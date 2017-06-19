@@ -10,7 +10,7 @@ The purpose of this project is to develop a nonlinear model predictive controlle
 
 The simulator feeds the controller its current state (speed, steering, throttle) and waypoints, and the controller creates a reference trajectory, along the center of the lane, and attempts to follow the reference trajectory as closely as possible, without steering off the track.
 
-
+[![](http://img.youtube.com/vi/7TZqQUVoocY/0.jpg)](https://youtu.be/7TZqQUVoocY)
 ## Dependencies
 
 * cmake >= 3.5
