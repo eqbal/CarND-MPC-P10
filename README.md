@@ -11,6 +11,45 @@ The purpose of this project is to develop a nonlinear model predictive controlle
 The simulator feeds the controller its current state (speed, steering, throttle) and waypoints, and the controller creates a reference trajectory, along the center of the lane, and attempts to follow the reference trajectory as closely as possible, without steering off the track.
 
 [![](http://img.youtube.com/vi/7TZqQUVoocY/0.jpg)](https://youtu.be/7TZqQUVoocY)
+
+## The Vehicle Model
+
+The vehicle model used in this project is a kinematic bicycle model. It neglects all dynamical effects such as inertia, friction and torque. The model takes changes of heading direction into account and is thus non-linear. The model used consists of the following equations
+
+```
+fg[1 + x_start + t]   = x1    - (x0 + v0 * CppAD::cos(psi0) * dt);
+fg[1 + y_start + t]   = y1    - (y0 + v0 * CppAD::sin(psi0) * dt);
+fg[1 + psi_start + t] = psi1  - (psi0 + v0 * delta0 / Lf * dt);
+fg[1 + v_start + t]   = v1    - (v0 + a0 * dt);
+fg[1 + cte_start + t] = cte1  - ((f0 - y0) + (v0 * CppAD::sin(epsi0) * dt));
+fg[1 + epsi_start + t]= epsi1 - ((psi0 - psides0) + v0 * delta0 / Lf * dt);
+
+```
+
+Here, the Lf is the the vehicle's manoeuvrability, and is the distance between its center of gravity and front wheels, and is determined empirically.
+
+The model works by tracking two errors: Cross Tracking Error (`CTE`) and Orientation Error (`Epsi`), and by attempting to reduce these two errors as it follows a reference trajectory.
+
+`x`,`y` denote the position of the car, `psi` the heading direction, `v` its velocity.
+
+The vehicle model can be found in the class `FG_eval`
+
+|state|description|
+|---|---|
+|x | position in x-direction|
+|y | position in y-direction|
+|psi | orientation|
+|v | velocity|
+|cte| cross track error|
+|epsi| orientation error|
+
+The following actuators are used to control the vehicle: `delta, a`:
+
+|actuator|description|limits|
+|---|---|---|
+|delta | steering angle| [-25°, 25°] |
+|a | throttle/brake | [-1, 1]|
+
 ## Dependencies
 
 * cmake >= 3.5
