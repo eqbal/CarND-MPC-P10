@@ -7,13 +7,13 @@
 using namespace std;
 
 const size_t N  = 20;
-const double dt = 0.05;
-const int Latency_dt = 2;
+const double dt = 0.05;   // 50 ms
+const int Latency_dt = 2; // Latency in units of dt
 
 // Scale factors for Cost
 const double SCALE_DELTA  = 1.0;
 const double SCALE_ACC    = 10.0;
-const double SCALE_DELTA_D = 300.0;
+const double SCALE_DELTA_D = 400.0;
 const double SCALE_ACC_D  = 2.0;
 
 // Result from the Solver
