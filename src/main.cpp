@@ -44,7 +44,8 @@ double polyeval(Eigen::VectorXd coeffs, double x) {
 // Fit a polynomial.
 // Adapted from
 // https://github.com/JuliaMath/Polynomials.jl/blob/master/src/Polynomials.jl#L676-L716
-Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals,
+Eigen::VectorXd polyfit(Eigen::VectorXd xvals,
+                        Eigen::VectorXd yvals,
                         int order) {
   assert(xvals.size() == yvals.size());
   assert(order >= 1 && order <= xvals.size() - 1);
@@ -63,6 +64,25 @@ Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals,
   auto Q = A.householderQr();
   auto result = Q.solve(yvals);
   return result;
+}
+
+// Convert from Map Coordinates to Car's Coordinates
+Eigen::MatrixXd convertToCarCoordinates(double x,
+                                        double y,
+                                        double psi,
+                                        const vector<double>& xpoints,
+                                        const vector<double>& ypoints) {
+    assert(xpoints.size() == ypoints.size());
+    unsigned  len = xpoints.size();
+
+    auto points = Eigen::MatrixXd(2, len);
+
+    for (auto k=0; k < len; k++) {
+      points(0, k) =  cos(psi) * (xpoints[k] - x) + sin(psi) * (ypoints[k] - y);
+      points(1, k) = -sin(psi) * (xpoints[k] - x) + cos(psi) * (ypoints[k] - y);
+    }
+
+    return points;
 }
 
 int main() {
@@ -87,42 +107,73 @@ int main() {
           // j[1] is the data JSON object
           vector<double> ptsx = j[1]["ptsx"];
           vector<double> ptsy = j[1]["ptsy"];
-          double px = j[1]["x"];
-          double py = j[1]["y"];
-          double psi = j[1]["psi"];
-          double v = j[1]["speed"];
+          double px           = j[1]["x"];
+          double py           = j[1]["y"];
+          double psi          = j[1]["psi"];
+          double v            = j[1]["speed"];
+
+          // 1 - Transform from Map coordinates to Car
+          Eigen::MatrixXd waypoints = convertToCarCoordinates(px, py, psi, ptsx, ptsy);
+          Eigen::VectorXd PointsX   = waypoints.row(0);
+          Eigen::VectorXd PointsY   = waypoints.row(1);
+
+          // 2 - Fit polynomial (degree 3) to the waypoints
+          auto coefficients = polyfit(PointsX, PointsY, 3);
+
+          // 3 - Determine Cross Track Error CTE
+          // Note: in Car's coordinates, the cte is the intercept at x=0
+          double cte = polyeval(coefficients, 0);
+
+          // 4 - Orientation error
+          // Note: in car'd coordinates, the orientation error epsi is
+          // -atan(b1 + b2*x, b3* x^2),
+          // but the car is always at x=0
+          double epsi = -atan(coefficients[1]);
+
+          // 5 - State (in car coordinates, x,y and orientation are 0)
+          Eigen::VectorXd state(6);
+          state << 0, 0, 0, v, cte, epsi;
+
+          // 6 - Determine a Reference trajectory
+          Resultant solution = mpc.Solve(state, coefficients);
 
           /*
-          * TODO: Calculate steering angle and throttle using MPC.
-          *
+          * 7 - Calculate steering angle and throttle using MPC.
           * Both are in between [-1, 1].
-          *
           */
-          double steer_value;
-          double throttle_value;
+          double steer_value      = solution.Delta.at(Latency_dt);
+          double throttle_value   = solution.A.at(Latency_dt);
+          mpc.delta_previous      = steer_value;
+          mpc.acc_previous        = throttle_value;
 
           json msgJson;
-          // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
-          // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
-          msgJson["steering_angle"] = steer_value;
-          msgJson["throttle"] = throttle_value;
+          msgJson["steering_angle"] = -steer_value / 0.436332;
+          msgJson["throttle"]       = throttle_value;
 
-          //Display the MPC predicted trajectory 
-          vector<double> mpc_x_vals;
-          vector<double> mpc_y_vals;
+          cout << " x         " << px << endl;
+          cout << " y         " << py << endl;
+          cout << " psi       " << psi << endl;
+          cout << " v         " << v << endl;
+          cout << " cte       " << cte << endl;
+          cout << " epsi      " << epsi << endl;
+          cout << " steer     " << steer_value << endl;
+          cout << " throttle  " << throttle_value << endl;
 
-          //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
-          // the points in the simulator are connected by a Green line
+          // 8 - Display the MPC predicted trajectory
+          /// vector<double> mpc_x_vals;
+          /// vector<double> mpc_y_vals;
 
-          msgJson["mpc_x"] = mpc_x_vals;
-          msgJson["mpc_y"] = mpc_y_vals;
+          msgJson["mpc_x"] = solution.X;
+          msgJson["mpc_y"] = solution.Y;
 
-          //Display the waypoints/reference line
+          // 9 - Display the waypoints/reference line
           vector<double> next_x_vals;
           vector<double> next_y_vals;
 
-          //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
-          // the points in the simulator are connected by a Yellow line
+          for (int j = 0; j < ptsx.size(); j++) {
+            next_x_vals.push_back(PointsX(j));
+            next_y_vals.push_back(PointsY(j));
+          }
 
           msgJson["next_x"] = next_x_vals;
           msgJson["next_y"] = next_y_vals;
@@ -141,13 +192,14 @@ int main() {
           // SUBMITTING.
           this_thread::sleep_for(chrono::milliseconds(100));
           ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
-        }
-      } else {
+        } // if event == 'telemetry'
+      }   // if s != ''
+      else {
         // Manual driving
         std::string msg = "42[\"manual\",{}]";
         ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
       }
-    }
+    } // if sdata == '42'
   });
 
   // We don't need this since we're not using HTTP but if it's removed the
