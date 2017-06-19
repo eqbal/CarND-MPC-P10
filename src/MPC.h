@@ -6,7 +6,7 @@
 
 using namespace std;
 
-const size_t N  = 20;
+const size_t N  = 12;
 const double dt = 0.05;   // 50 ms
 const int Latency_dt = 2; // Latency in units of dt
 

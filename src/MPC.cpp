@@ -11,7 +11,7 @@ const double Lf = 2.67;
 // Useful constants
 const double REF_CTE = 0;   // desired CTE, Cross Track Error
 const double REF_EPSI = 0;  // desired EPsi
-const double REF_V  = 75;   // max car velocity, mph
+const double REF_V  = 85;   // max car velocity, mph
 
 // Start variable positions, since the Solver takes State and Actuator variables in a single vector
 size_t  x_start     = 0;
