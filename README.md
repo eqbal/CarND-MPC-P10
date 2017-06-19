@@ -50,6 +50,77 @@ The following actuators are used to control the vehicle: `delta, a`:
 |delta | steering angle| [-25°, 25°] |
 |a | throttle/brake | [-1, 1]|
 
+## Time Step and Duration
+
+The MPC model works by creating a predicted reference trajectory for T seconds ahead on the horizon of its current position. Since `T = N * dt`, where `N` is number of timesteps and `dt` is the timeperiod delta (in seconds), I started off with small values of N and dt.
+
+Larger values of T means longer horizons and smoother changes over time, but also larger deviations in tracking as horizons can change dramatically; smaller T means shorted horizons, more responsiveness and more accurate, but means more discrete changes.
+
+Using a reference target speed of 50 mph, I started with dt = 0.05 and N = 10. Increasing the max velocity led to oscillations of vehicle. In the, with trial and error, I settled down to `N = 12` and `dt = 0.05`, with velocity slowly increasing from ~30 mph to 85 mph (final).
+
+## Cost and Error Tracking
+
+The model calculates error by assigning a Cost function and fitting a polynomial to the reference (projected) trajectory, iteratively for each waypoint. As the vehicle's current state matches the reference trajectory, the error from deviation (or cost) is minimized; as the vehicle does not match the trajectory, the error (or cost) increases. The optimization to reduce the cost function is performed by IpOpt library.
+
+The cost function includes three components:
+
+- Cost based on Reference State. This cost penalizes the magnitude of CTE and Epsi; the larger the magnitudes, the higher the costs.
+- Cost based on Rate of Change of Actuations. This cost penalizes the rate of change of CTE and Epsi, so that vehicles do not abruptly jerk left/right.
+- Cost based on Sequential Actuations. This cost penalizes the gap between sequential actuations.
+
+	```
+	    // 1. Cost Function
+	    // State: [x,y,ψ,v,cte,eψ]
+	    // 1a - Cost based on Reference State; for Trajectory, set cost to 0
+	    for (int t = 0; t < N; t++) {
+	      fg[0] +=  1.0 * CppAD::pow(vars[cte_start + t] - REF_CTE, 2);   // Cross Track Error
+	      fg[0] +=  1.0 * CppAD::pow(vars[epsi_start + t] - REF_EPSI, 2); // Orientation error
+	      fg[0] +=  1.0 * CppAD::pow(vars[v_start + t] - REF_V, 2);       // Velocity error
+	    }
+	
+	    // 1b - Minimise the use of Actuators
+	    // Add Scaling factor to smooth out
+	    for (int t = 0; t < N - 1; t++) {
+	      fg[0] +=  SCALE_DELTA * CppAD::pow(vars[delta_start + t], 2);
+	      fg[0] +=  SCALE_ACC   * CppAD::pow(vars[a_start + t], 2);
+	    }
+	
+	    // 1c - Minimize the value gap between sequential actuations
+	    // Add Scaling factor to smooth out
+	    for (int t = 0; t < N - 2; t++) {
+	      fg[0] +=  SCALE_DELTA_D * CppAD::pow(vars[delta_start + t + 1] - vars[delta_start + t], 2);
+	      fg[0] +=  SCALE_ACC_D   * CppAD::pow(vars[a_start + t + 1]  - vars[a_start + t], 2);
+	    }
+	
+	```
+
+To account for sudden changes in CTE and EPsi, a scaling factor was added that keeps the various cost components together. This nicely enables us to tune the various cost components individually.
+
+```
+const double SCALE_DELTA  = 1.0;
+const double SCALE_ACC    = 10.0;
+const double SCALE_DELTA_D = 400.0;
+const double SCALE_ACC_D  = 2.0;
+```
+
+Increasing the weight on different cost components ensures smoother vehicle handling (turns and acceleration). A major effort of tuning went into selecting various values by trial and error. The Cost function is implemented in `FG_eval`.
+
+## Polynomial Fitting
+The simulator sends its coordinates to the MPC controller in the global Map coordinates. These waypoints are converted into Vehicle's coordinates using a transform. This is implemented in convertoToCarCoordinates in main.cpp. The transform essentially shifts the origin to the vehicle's current position, and then applies a 2D rotation to align x-axis to the heading of the vehicle.
+
+```
+New X = cos(psi) * (mapX - x) + sin(psi) * (mapY - y)
+New Y = -sin(psi) * (mapX - x) + cos(psi) * (mapY - y)
+```
+
+This ensures that state of the vehicle is [0, 0, 0, v, cte, epsi] (the first three 0s are x,y,psi).
+
+## Latency
+
+In real world, the actuations on steering and throttle take finite amount of time to take effect. In this case, a latency of 100 ms is given. When latency delays are not taken into account, the vehicle can sometimes be in an unpredictable state.
+
+To counter the effect of latency, constraints were introduced for the duration of latency (100 ms, which is 2 dt timesteps). The actuations values of previous iteration were stored and applied for the duration of latency; this ensures that actuations are smooth, and optimal trajectory is calculated starting from time after the latency. This is implemented in MPC::Solve.
+
 ## Dependencies
 
 * cmake >= 3.5
